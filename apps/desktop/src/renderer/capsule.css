@@ -1,0 +1,50 @@
+* { box-sizing: border-box; }
+html, body { margin: 0; background: transparent; overflow: hidden; }
+body { --tone: #8de6c5; font: 11px/1.4 system-ui, "Microsoft YaHei", sans-serif; user-select: none; color: #f0f3f2; }
+body[data-phase="thinking"] { --tone: #b7a4ef; }
+body[data-phase="executing"] { --tone: #92beef; }
+body[data-phase="approval"], body[data-phase="question"], body[data-phase="plan"] { --tone: #efc48b; }
+button { font: inherit; color: inherit; border: 0; padding: 0; cursor: pointer; background: transparent; -webkit-app-region: no-drag; }
+button:focus-visible { outline: 1px solid var(--tone); outline-offset: -2px; }
+.peek { position: absolute; inset: 0 8px auto; height: 12px; display: flex; align-items: center; justify-content: center; gap: 7px; border-radius: 0 0 12px 12px; background: #161b1af5; box-shadow: inset 0 -1px 0 #ffffff18; font-size: 8px; letter-spacing: .3px; color: #bcc7c1; transition: opacity .15s; }
+.peek-flow { width: 24px; height: 2px; border-radius: 4px; background: var(--tone); box-shadow: 0 0 7px var(--tone); animation: breathe 3s ease-in-out infinite; }
+#peek-count { color: var(--tone); font-variant-numeric: tabular-nums; }
+.capsule { height: 76px; margin: 0 8px; padding: 11px 14px 8px; position: relative; border-radius: 0 0 22px 22px; background: linear-gradient(125deg, #222927fc, #121817fc 80%); border: 1px solid #ffffff15; border-top: 0; box-shadow: 0 5px 8px #0004, inset 0 -1px 0 #ffffff08; opacity: 0; transform: translateY(-16px) scale(.96); transform-origin: top center; pointer-events: none; transition: transform .28s cubic-bezier(.2,.9,.25,1), opacity .18s; }
+.expanded .capsule { opacity: 1; transform: translateY(0) scale(1); pointer-events: auto; }
+.expanded .peek { opacity: 0; pointer-events: none; }
+.grip { position: absolute; inset: 0 22px auto; height: 11px; display: grid; place-items: center; -webkit-app-region: drag; }
+.grip span { height: 2px; width: 26px; border-radius: 2px; background: #ffffff24; }
+.task { width: 100%; display: flex; align-items: center; gap: 10px; text-align: left; border-radius: 9px; touch-action: pan-y; }
+.task:hover .heading strong { color: white; }
+.orb { display: block; width: 24px; height: 24px; flex-shrink: 0; position: relative; border-radius: 50%; overflow: hidden; background: #ffffff09; box-shadow: 0 0 13px color-mix(in srgb, var(--tone) 15%, transparent); animation: breathe 3s ease-in-out infinite; }
+.orb i { position: absolute; inset: 3px; border-radius: 40% 60% 65% 35%; background: var(--tone); filter: blur(3px); opacity: .8; animation: flow 7s linear infinite; }
+.orb i:nth-child(2) { inset: 8px -3px -3px 8px; background: #68b6bc; opacity: .5; animation-direction: reverse; animation-duration: 9s; }
+.orb i:nth-child(3) { inset: -4px 10px 10px -3px; background: #e3faee; opacity: .5; animation-duration: 11s; }
+.copy { flex: 1; min-width: 0; }
+.heading, .detail { display: flex; align-items: center; gap: 7px; }
+.heading strong { flex: 1; min-width: 0; font-size: 11px; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+#elapsed { color: #88958f; font-size: 10px; font-variant-numeric: tabular-nums; flex-shrink: 0; }
+.detail { margin-top: 3px; font-size: 10px; color: #9dada5; }
+#phase { color: var(--tone); flex-shrink: 0; }
+#tool, #progress { min-width: 0; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.footer { display: flex; align-items: center; gap: 8px; height: 17px; margin: 4px 0 0 34px; color: #8e9c96; font-size: 9px; }
+#progress { flex: 1; }
+nav { display: flex; align-items: center; gap: 3px; }
+nav button { display: grid; place-items: center; width: 20px; height: 17px; border-radius: 5px; color: #c7d3ce; }
+nav button:hover { background: #ffffff10; }
+nav svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.5; }
+#position { min-width: 24px; text-align: center; font-variant-numeric: tabular-nums; }
+.track { position: absolute; bottom: 5px; left: 48px; right: 16px; height: 1px; background: #ffffff0d; border-radius: 2px; overflow: hidden; }
+#fill { height: 100%; background: var(--tone); transition: width .35s; }
+[hidden] { display: none !important; }
+@keyframes breathe { 0%, 100% { opacity: .6; } 50% { opacity: 1; } }
+@keyframes flow { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) { .orb, .orb i, .peek-flow { animation: none; } .capsule, .peek, #fill { transition: none; } }
+/* MacBook notch: the window is centered on the camera housing and flush with the top edge. The black card
+   continues the housing, so --notch (its height in px) is reserved at the top and content only uses the ears. */
+.notch { --notch: 37px; }
+.notch .peek { inset: 0; height: auto; justify-content: space-between; padding: 0 14px; border-radius: 0 0 14px 14px; background: #000; box-shadow: none; }
+.notch #peek-phase { display: none; }
+.notch .capsule { height: calc(var(--notch) + 70px); margin: 0; padding: calc(var(--notch) + 4px) 14px 8px; background: #000; border: 0; box-shadow: none; }
+.notch .grip { display: none; }
+.notch .track { background: #ffffff14; }

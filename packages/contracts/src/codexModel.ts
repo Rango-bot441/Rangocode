@@ -1,0 +1,63 @@
+/**
+ * Codex model-providers configuration types.
+ *
+ * MarioCode drives the Codex agent harness with user-configured third-party model
+ * providers (OpenAI-compatible endpoints that speak the Responses API). The
+ * provider list lives in the settings table (`codexProviders`, metadata only)
+ * plus a safeStorage-encrypted key map (`codexProviderKeys`); at turn time the
+ * provider materializes them into `<CODEX_HOME>/config.toml`'s
+ * `[model_providers.<id>]` tables and injects each decrypted key into the
+ * app-server subprocess env (`MARIOCODE_CODEX_KEY_<ID>` — referenced by the TOML
+ * `env_key` field). Cleartext keys never touch disk or IPC.
+ *
+ * ⚠️ Codex only supports `wire_api = "responses"` (the Chat Completions wire
+ * API is deprecated upstream). Native Responses endpoints are preferred; shared
+ * Chat Completions and Anthropic Messages models use a per-turn local bridge.
+ */
+
+/** One model entry under a provider. */
+export interface CodexModelOption {
+  /** Model id sent to the API (also used for thread/turn `model`). */
+  id: string;
+  /** Display name; defaults to `id` when absent. */
+  label?: string;
+  /** Optional trailing hint in the picker (e.g. "1M"). */
+  hint?: string;
+  /** Context window override for models the codex catalog doesn't know
+   *  (third-party endpoints). When set, the app-server process is spawned
+   *  with `-c model_context_window=<n>` — a PROCESS-LOCAL config override
+   *  (priority over config.toml), so concurrent sessions with different
+   *  windows never race on the shared config file. Omitted → codex's
+   *  fallback metadata. */
+  contextWindow?: number;
+  protocol?: "responses" | "chat-completions" | "anthropic";
+  baseUrl?: string;
+  maxTokens?: number;
+}
+
+/** Persisted shape of one provider entry (settings table, no secrets). */
+export interface CodexProviderConfig {
+  /** Human display name. */
+  name: string;
+  /** Default Responses endpoint base URL; shared models may override protocol and endpoint. */
+  baseUrl: string;
+  /** Models offered by this provider (>= 1 required). */
+  models: CodexModelOption[];
+  /** Opt-in unlock for codex's standalone image generation tool
+   *  (`image_gen.imagegen`). When true, the provider's config.toml table
+   *  gets a nonempty `x-openai-actor-authorization` http_header — codex
+   *  registers imagegen only for `is_openai()` / actor-header / openai-auth
+   *  providers. The gateway must back `/v1/images/generations` with the
+   *  fixed `gpt-image-2` model (codex hardcodes it in the images request).
+   *  Absent/false → no image tool in the model's tool list. */
+  imageGeneration?: boolean;
+}
+
+/** Renderer-facing view of a provider (apiKey never sent — only a presence
+ *  flag so the UI can show "已配置 Key" / "未配置 Key"). */
+export interface CodexProviderPublic extends CodexProviderConfig {
+  /** Stable slug used as the TOML table key + env-var suffix. */
+  id: string;
+  /** Whether a key is stored in the encrypted credentials map. */
+  hasApiKey: boolean;
+}

@@ -1,0 +1,51 @@
+/**
+ * SettingsSection — a functional category inside a settings panel.
+ *
+ * The middle level of the settings visual hierarchy (see PanelHeader):
+ * a category label (the "功能分类标题") sits above a bordered Card that
+ * contains the actual setting rows (the "功能标题" + controls). The label
+ * is a quiet eyebrow (ui-refresh `.set-sec h3`: 13px, 500, muted); group vs
+ * row reads from position — the label sits outside the card, rows inside.
+ *
+ * @example
+ *   <SettingsSection title="提交记录生成" desc="配置生成提交信息的模型与提示词。">
+ *     <SettingRow title="生成模型">…</SettingRow>
+ *   </SettingsSection>
+ */
+import type { ComponentType, ReactNode } from "react";
+import { cn } from "@renderer/lib/cn.js";
+import { Card } from "@renderer/components/ui/index.js";
+import type { TablerIconProps } from "@renderer/lib/icons.js";
+
+export function SettingsSection({
+  title,
+  desc,
+  icon: Icon,
+  className,
+  children,
+}: {
+  /** 分类标题 (rendered as a small muted eyebrow above the card). */
+  title: string;
+  desc?: ReactNode;
+  icon?: ComponentType<TablerIconProps>;
+  className?: string;
+  /** Setting rows (SettingRow) — share `divide-y` hairlines inside the card. */
+  children: ReactNode;
+}) {
+  return (
+    <section className={cn("settings-section space-y-3", className)}>
+      <div className="flex items-center gap-2 px-1">
+        {Icon && <Icon size={15} className="shrink-0 text-content-muted" />}
+        <h3 className="text-[0.9286em] font-medium text-content-muted">
+          {title}
+        </h3>
+      </div>
+      {desc && (
+        <p className="px-1 text-[0.7857em] leading-relaxed text-content-subtle">
+          {desc}
+        </p>
+      )}
+      <Card className="divide-y divide-edge">{children}</Card>
+    </section>
+  );
+}

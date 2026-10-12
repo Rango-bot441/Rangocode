@@ -1,0 +1,197 @@
+import { z } from "zod";
+
+export const SharedProviderProtocolSchema = z.enum(["anthropic", "chat-completions", "responses"]);
+export type SharedProviderProtocol = z.infer<typeof SharedProviderProtocolSchema>;
+export const SharedProviderAgentSchema = z.enum(["claude", "codex", "pi"]);
+export type SharedProviderAgent = z.infer<typeof SharedProviderAgentSchema>;
+
+const HttpUrlSchema = z.string().trim().max(2_048).url().refine((value) => {
+  // zod's url() already validates the complete URL syntax. Keep the policy
+  // checks environment-neutral so this contracts package does not require the
+  // DOM `URL` global in its TypeScript lib: only http(s), no userinfo, query,
+  // or fragment. The authority is the substring before the first path slash.
+  const scheme = /^(https?):\/\//i.exec(value);
+  if (!scheme || value.includes("?") || value.includes("#")) return false;
+  const remainder = value.slice(scheme[0].length);
+  const slash = remainder.indexOf("/");
+  const authority = slash < 0 ? remainder : remainder.slice(0, slash);
+  return authority.length > 0 && !authority.includes("@");
+}, "must be an http(s) URL without embedded credentials, query, or fragment");
+
+/** Every origin (scheme + authority) a provider's saved API key can be sent
+ *  to: the base URL, the models endpoint, and any per-protocol override.
+ *  Parsed with the same string walk as HttpUrlSchema so this package stays
+ *  free of the DOM `URL` global. */
+export function sharedProviderOrigins(value: {
+  baseUrl: string;
+  modelsEndpoint?: string;
+  endpointOverrides?: Partial<Record<SharedProviderProtocol, string>>;
+}): string[] {
+  const origins = new Set<string>();
+  const add = (url?: string): void => {
+    const trimmed = url?.trim();
+    if (!trimmed) return;
+    const scheme = /^(https?):\/\//i.exec(trimmed);
+    if (!scheme) return;
+    const remainder = trimmed.slice(scheme[0].length);
+    const slash = remainder.indexOf("/");
+    const authority = (slash < 0 ? remainder : remainder.slice(0, slash)).toLowerCase();
+    if (authority) origins.add(`${scheme[1]!.toLowerCase()}://${authority}`);
+  };
+  add(value.baseUrl);
+  add(value.modelsEndpoint);
+  for (const url of Object.values(value.endpointOverrides ?? {})) add(url);
+  return [...origins].sort();
+}
+
+/**
+ * True when saving `next` would send the stored key somewhere `previous` never
+ * sent it — a different host/port, or an https→http downgrade. Those edits
+ * require re-entering the key so a saved credential is never silently
+ * forwarded to a new server.
+ *
+ * Deliberately narrower than comparing whole URLs (which is what this used to
+ * do): editing only the PATH on an already-trusted origin (fixing `/v1`,
+ * adding a trailing slash) keeps the key, and REMOVING a destination is always
+ * safe. Both main (enforcement) and the settings panel (pre-submit warning)
+ * call this, so the rule exists once.
+ */
+export function sharedProviderAddsOrigin(
+  previous: Parameters<typeof sharedProviderOrigins>[0],
+  next: Parameters<typeof sharedProviderOrigins>[0],
+): boolean {
+  const known = new Set(sharedProviderOrigins(previous));
+  return sharedProviderOrigins(next).some((origin) => !known.has(origin));
+}
+
+export const SharedProviderModelSchema = z.object({
+  id: z.string().trim().min(1).max(256),
+  label: z.string().trim().min(1).max(256).optional(),
+  /** Optional per-model interfaces. Missing means inherit provider protocols. */
+  interfaces: z.array(SharedProviderProtocolSchema).min(1).max(3).optional(),
+  contextWindow: z.number().int().positive().optional(),
+  maxTokens: z.number().int().positive().optional(),
+  reasoning: z.boolean().optional(),
+  input: z.array(z.enum(["text", "image"])).min(1).max(2).optional(),
+  /** The model can generate images (images/generations endpoint). A user
+   *  marker picked in the "加载模型" dialog; informational for now — the
+   *  MarioTool image generator still takes its model from 内置工具 settings. */
+  imageGeneration: z.boolean().optional(),
+}).strict();
+
+export type SharedProviderModel = z.infer<typeof SharedProviderModelSchema>;
+
+/** Resolve the effective interfaces for one model, retaining the old
+ * provider-wide behavior for configs written before model-level selection. */
+export function resolveSharedModelInterfaces(
+  providerProtocols: readonly SharedProviderProtocol[],
+  modelInterfaces?: readonly SharedProviderProtocol[],
+): SharedProviderProtocol[] {
+  const source = modelInterfaces ?? providerProtocols;
+  return [...new Set(source.filter((protocol) => providerProtocols.includes(protocol)))];
+}
+
+/** Stable routing order, independent of checkbox / JSON ordering. Claude
+ * and Pi support Chat, Messages and Responses; Codex only speaks Responses. */
+const AGENT_PROTOCOLS: Record<SharedProviderAgent, readonly SharedProviderProtocol[]> = {
+  claude: ["chat-completions", "anthropic", "responses"],
+  codex: ["responses", "chat-completions", "anthropic"],
+  pi: ["chat-completions", "anthropic", "responses"],
+};
+
+export function resolveSharedModelProtocol(
+  agent: SharedProviderAgent,
+  providerProtocols: readonly SharedProviderProtocol[],
+  modelInterfaces?: readonly SharedProviderProtocol[],
+): SharedProviderProtocol | undefined {
+  const interfaces = resolveSharedModelInterfaces(providerProtocols, modelInterfaces);
+  return AGENT_PROTOCOLS[agent].find((protocol) => interfaces.includes(protocol));
+}
+
+const EndpointOverridesSchema = z.object({
+  anthropic: HttpUrlSchema.optional(),
+  "chat-completions": HttpUrlSchema.optional(),
+  responses: HttpUrlSchema.optional(),
+}).strict().optional();
+
+function compatible(value: { protocols: SharedProviderProtocol[]; enabledAgents: SharedProviderAgent[]; models: SharedProviderModel[] }): boolean {
+  return value.enabledAgents.every((agent) =>
+    value.models.some((model) => resolveSharedModelProtocol(agent, value.protocols, model.interfaces) !== undefined),
+  );
+}
+
+const SharedProviderCoreShape = {
+  name: z.string().trim().min(1).max(256),
+  baseUrl: HttpUrlSchema,
+  modelsEndpoint: HttpUrlSchema.optional(),
+  protocols: z.array(SharedProviderProtocolSchema).min(1).max(3),
+  endpointOverrides: EndpointOverridesSchema,
+  models: z.array(SharedProviderModelSchema).min(1).max(1_000),
+  enabledAgents: z.array(SharedProviderAgentSchema).min(1).max(3),
+};
+
+function validateCore(value: { protocols: SharedProviderProtocol[]; enabledAgents: SharedProviderAgent[]; models: SharedProviderModel[]; endpointOverrides?: Partial<Record<SharedProviderProtocol, string>> }, ctx: z.RefinementCtx): void {
+  if (new Set(value.protocols).size !== value.protocols.length) ctx.addIssue({ code: "custom", message: "protocols must be unique" });
+  if (new Set(value.enabledAgents).size !== value.enabledAgents.length) ctx.addIssue({ code: "custom", message: "enabledAgents must be unique" });
+  if (new Set(value.models.map((model) => model.id)).size !== value.models.length) ctx.addIssue({ code: "custom", message: "model ids must be unique" });
+  for (const model of value.models) {
+    if (model.interfaces && new Set(model.interfaces).size !== model.interfaces.length) {
+      ctx.addIssue({ code: "custom", message: `model interfaces must be unique: ${model.id}` });
+    }
+    if (model.interfaces?.some((protocol) => !value.protocols.includes(protocol))) {
+      ctx.addIssue({ code: "custom", message: `model interfaces must be enabled by provider: ${model.id}` });
+    }
+  }
+  if (!compatible(value)) ctx.addIssue({ code: "custom", message: "enabled agent has no compatible protocol" });
+  for (const protocol of Object.keys(value.endpointOverrides ?? {})) {
+    if (!value.protocols.includes(protocol as SharedProviderProtocol)) ctx.addIssue({ code: "custom", message: `endpoint override requires enabled protocol: ${protocol}` });
+  }
+}
+
+export const SharedProviderPublicSchema = z.object({
+  ...SharedProviderCoreShape,
+  id: z.string().uuid(),
+  hasApiKey: z.boolean(),
+}).strict().superRefine(validateCore);
+export type SharedProviderPublic = z.infer<typeof SharedProviderPublicSchema>;
+
+export const SharedProviderSaveInputSchema = z.object({
+  ...SharedProviderCoreShape,
+  id: z.string().uuid().optional(),
+  apiKey: z.string().max(65_536).optional(),
+}).strict().superRefine(validateCore);
+export type SharedProviderSaveInput = z.infer<typeof SharedProviderSaveInputSchema>;
+
+export const SharedProviderRemoveInputSchema = z.object({ id: z.string().uuid() }).strict();
+export type SharedProviderRemoveInput = z.infer<typeof SharedProviderRemoveInputSchema>;
+
+/** One-off model discovery. The renderer may submit an unsaved draft key, but
+ * the main process is solely responsible for deciding whether a saved key may
+ * be reused. Neither the input key nor any saved key is returned. */
+export const SharedProviderDiscoverInputSchema = z.object({
+  id: z.string().uuid().optional(),
+  baseUrl: HttpUrlSchema,
+  protocol: SharedProviderProtocolSchema,
+  modelsEndpoint: HttpUrlSchema.optional(),
+  apiKey: z.string().max(65_536).optional(),
+}).strict();
+export type SharedProviderDiscoverInput = z.infer<typeof SharedProviderDiscoverInputSchema>;
+
+export const SharedProviderDiscoveredModelSchema = z.object({
+  id: z.string().trim().min(1).max(256),
+  label: z.string().trim().min(1).max(256),
+}).strict();
+export type SharedProviderDiscoveredModel = z.infer<typeof SharedProviderDiscoveredModelSchema>;
+
+export interface SharedProviderDiscoveryResult {
+  models: SharedProviderDiscoveredModel[];
+  /** True when MarioCode stopped at its local result cap. */
+  truncated: boolean;
+  /** True when either the local cap or upstream pagination indicates more rows. */
+  partial: boolean;
+}
+
+export function sharedRuntimeId(id: string): string {
+  const parsed = z.string().uuid().parse(id);
+  return `shared_${parsed.replaceAll("-", "")}`;
+}
